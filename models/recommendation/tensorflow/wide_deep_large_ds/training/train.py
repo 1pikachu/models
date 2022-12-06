@@ -28,6 +28,8 @@ import numpy as np
 import os.path
 from os import path
 import sys
+
+import hooks
 # Set to INFO for tracking training, default is WARN. ERROR for least messages
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.INFO)
 print("Using TensorFlow version %s" % (tf.__version__))
@@ -37,6 +39,8 @@ LABEL_COLUMN = ["clicked"]
 TRAIN_DATA_COLUMNS = LABEL_COLUMN + CONTINUOUS_COLUMNS + CATEGORICAL_COLUMNS
 FEATURE_COLUMNS = CONTINUOUS_COLUMNS + CATEGORICAL_COLUMNS
 
+
+tf.config.experimental.enable_tensor_float_32_execution(False)
 
 def generate_input_fn(filename, batch_size, num_epochs):
     def parse_csv(value):
@@ -191,10 +195,14 @@ def train_and_eval():
         print('------------------------------------------------------------------------------------------')
         print("train.csv or eval.csv does not exist in the given data_location. Please provide valid path")
         print('------------------------------------------------------------------------------------------')
-        sys.exit() 
+        sys.exit()
+
     no_of_training_examples = sum(1 for line in open(train_file))
     no_of_test_examples = sum(1 for line in open(test_file))
     batch_size = args.batch_size
+    # init hook
+    train_hook = hooks.ExamplesPerSecondHook(batch_size, every_n_steps=4, warm_steps=args.warmup_iters)
+
     if args.steps == 0:
         no_of_epochs = 10
         train_steps = math.ceil(
@@ -211,18 +219,19 @@ def train_and_eval():
     export_dir = args.output_dir
     m = build_estimator(model_type, checkpoint_dir, train_file, test_file)
     m.train(input_fn=lambda: generate_input_fn(
-        train_file, batch_size, int(no_of_epochs)),steps=int(train_steps))
+        train_file, batch_size, int(no_of_epochs)),steps=int(train_steps),
+        hooks=[train_hook])
     print('fit done')
-    results = m.evaluate(input_fn=lambda: generate_input_fn(
-        test_file, batch_size, 1), steps=test_steps)
-    print('evaluate done')
+    #results = m.evaluate(input_fn=lambda: generate_input_fn(
+    #    test_file, batch_size, 1), steps=test_steps)
+    #print('evaluate done')
 
-    export_folder = m.export_saved_model(
-        export_dir,
-        serving_input_fn
-    )
-    print('Model exported to ' + export_dir)
-    print('Accuracy: %s' % results['accuracy'])
+    #export_folder = m.export_saved_model(
+    #    export_dir,
+    #    serving_input_fn
+    #)
+    #print('Model exported to ' + export_dir)
+    #print('Accuracy: %s' % results['accuracy'])
 
 
 def get_arg_parser():
@@ -253,6 +262,12 @@ def get_arg_parser():
         '--checkpoint',
         help='Full path to the input/output directory for checkpoints',
         required=False
+    )
+    parser.add_argument(
+        '--warmup_iters',
+        help="training warmup",
+        type=int,
+        default=20
     )
     return parser
 
